@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dev-dist/
+# El contenido del viaje vive en Supabase (protegido con código), no en este repo público
+seed/
+*.log
+.DS_Store
