@@ -1,9 +1,11 @@
-// Calcula el horario de un día: llegada, espera, inicio y fin de cada parada, tramos y alertas.
+// Calcula el horario de un día: llegada, espera, inicio y fin de cada parada, tramos (a pie o en transporte) y alertas.
 import { get } from './store.js';
 import { toMin, fmt, dow, rangesFor, DOW } from './time.js';
 import { walkInfo, sameLoc, requestRoute } from './geo.js';
+import { getTransit, requestTransit, resolveLeg, estimatePT, isAutoMove, MIN_PT_M, DEFAULT_WALK_MAX } from './transit.js';
+import { optFare, manualFare } from './fares.js';
 
-export const MODE_LABEL = { walk: 'a pie', metro: 'metro', bus: 'bus', train: 'tren', tram: 'tranvía', vaporetto: 'vaporetto', taxi: 'taxi', plane: 'vuelo' };
+export const MODE_LABEL = { walk: 'a pie', metro: 'metro', bus: 'bus', train: 'tren', tram: 'tranvía', vaporetto: 'vaporetto', taxi: 'taxi', plane: 'vuelo', pt: 'transporte', 'pt-est': 'transporte' };
 
 export function cityLodgingLoc(city) {
   if (!city) return null;
@@ -54,43 +56,61 @@ export function resolveItem(it, day) {
 
 export function buildSchedule(day, { fetchRoutes = true } = {}) {
   const wd = dow(day.date);
+  const walkMax = (get('trip') || {}).walkMax || DEFAULT_WALK_MAX;
+  const online = typeof navigator === 'undefined' || navigator.onLine;
   const rows = [];
+  const trips = [];
   let t = toMin(day.start) ?? 9 * 60;
-  let prev = null; // última ubicación conocida
+  let prev = null;      // última ubicación conocida
+  let prevPid = null;   // lugar de la última ubicación (para tarifas de aeropuerto)
+  let curCity = (day.cities || [])[0] || null;
   let walkM = 0;
   for (let i = 0; i < (day.items || []).length; i++) {
     const it = day.items[i];
     const r = resolveItem(it, day);
     const row = { item: it, index: i, ...r, alerts: [], move: null };
+    if (r.kind === 'place' && r.place) curCity = r.place.cityId || curCity;
+    if (r.kind === 'lodging' && r.cityId) curCity = r.cityId;
+    const legCity = r.kind === 'transfer' ? (r.transfer.from || curCity) : curCity;
+    const destPid = r.kind === 'place' ? it.p : r.kind === 'transfer' ? r.transfer.fromId : r.kind === 'lodging' ? 'lodging' : null;
     // Tramo desde la parada anterior
     let travel = 0;
     if (r.loc && prev && !sameLoc(prev, r.loc)) {
-      const mode = (it.move && it.move.m) || 'walk';
-      if (it.move && typeof it.move.min === 'number') {
-        travel = it.move.min;
-        row.move = { mode, min: travel, txt: it.move.txt || '', from: prev, to: r.loc };
-        if (mode === 'walk') {
-          const w = walkInfo(prev, r.loc);
-          row.move.km = w.d / 1000;
-          walkM += w.d;
-          if (fetchRoutes && w.est) requestRoute(prev, r.loc);
-        }
-      } else if (mode === 'walk') {
-        const w = walkInfo(prev, r.loc);
-        if (fetchRoutes && w.est) requestRoute(prev, r.loc);
-        travel = Math.max(1, Math.round(w.t / 60));
+      const w = walkInfo(prev, r.loc);
+      if (fetchRoutes && w.est) requestRoute(prev, r.loc);
+      const tr = w.d >= MIN_PT_M ? getTransit(prev, r.loc, t, legCity) : null;
+      if (fetchRoutes && online && tr && tr.status !== 'ok' && tr.status !== 'none' && tr.status !== 'pending') requestTransit(prev, r.loc, t, day.date);
+      const ch = resolveLeg(it.move, w, tr, walkMax);
+      const walkMinutes = Math.max(1, Math.round(w.t / 60));
+      const base = {
+        from: prev, to: r.loc, km: w.d / 1000, walkMin: walkMinutes, walkEst: w.est,
+        opts: tr ? tr.opts : [], tstatus: tr ? tr.status : 'short', tkey: tr ? tr.key : null,
+        auto: ch.auto, suggest: ch.suggest || null, cityId: legCity, txt: (it.move && !isAutoMove(it.move) && it.move.txt) || '', depart: t
+      };
+      if (ch.kind === 'walk') {
+        travel = walkMinutes;
         walkM += w.d;
-        row.move = { mode, min: travel, km: w.d / 1000, est: w.est, txt: (it.move && it.move.txt) || '', from: prev, to: r.loc };
-        if (w.d > 3500) row.alerts.push({ level: 'warn', text: `Tramo largo a pie (${(w.d / 1000).toFixed(1)} km). ¿Metro o bus?` });
+        row.move = { ...base, mode: 'walk', min: travel, est: w.est };
+        if (ch.auto && w.d > 3500 && !base.opts.length && base.tstatus !== 'pending' && base.tstatus !== 'missing') row.alerts.push({ level: 'warn', text: `Tramo largo a pie (${(w.d / 1000).toFixed(1)} km) y no encontré transporte: revisen Google Maps` });
+      } else if (ch.kind === 'pt') {
+        travel = ch.opt.min;
+        walkM += ch.opt.walkM || 0;
+        row.move = { ...base, mode: 'pt', min: travel, opt: ch.opt, fare: optFare(ch.opt, legCity) };
+      } else if (ch.kind === 'pt-est') {
+        travel = estimatePT(w.d);
+        row.move = { ...base, mode: 'pt-est', min: travel, est: true, fare: manualFare(legCity, 'metro', prevPid, destPid) };
       } else {
-        // modo de transporte sin minutos: estimación muy simple
-        const w = walkInfo(prev, r.loc);
-        travel = Math.round(10 + (w.d / 1000) * 3);
-        row.move = { mode, min: travel, est: true, txt: (it.move && it.move.txt) || '', from: prev, to: r.loc };
+        const mv = it.move;
+        travel = typeof mv.min === 'number' ? mv.min : (mv.m === 'walk' ? walkMinutes : estimatePT(w.d));
+        if (mv.m === 'walk') walkM += w.d;
+        row.move = { ...base, mode: mv.m, min: travel, manual: true, est: typeof mv.min !== 'number', fare: manualFare(legCity, mv.m, prevPid, destPid) };
       }
     } else if (it.move && typeof it.move.min === 'number' && it.move.min > 0 && r.loc) {
       travel = it.move.min;
-      row.move = { mode: it.move.m || 'walk', min: travel, txt: it.move.txt || '', from: prev, to: r.loc };
+      row.move = { mode: it.move.m || 'walk', min: travel, txt: it.move.txt || '', from: prev, to: r.loc, manual: true, cityId: legCity, opts: [], fare: manualFare(legCity, it.move.m, prevPid, destPid) };
+    }
+    if (row.move && row.move.fare && row.move.fare.amt > 0) {
+      trips.push({ date: day.date, cityId: row.move.cityId, parts: row.move.fare.parts, amt: row.move.fare.amt, cur: row.move.fare.cur, est: !!(row.move.est || row.move.fare.est), j: `${day.date}#${it.id || i}` });
     }
     row.arrive = t + travel;
     let start = row.arrive;
@@ -100,6 +120,10 @@ export function buildSchedule(day, { fetchRoutes = true } = {}) {
       let arr = toMin(r.transfer.arr);
       if (dep != null) {
         if (row.arrive > dep) row.alerts.push({ level: 'danger', text: `Llegas a las ${fmt(row.arrive)} y sale a las ${r.transfer.dep}` });
+        else {
+          const need = r.transfer.mode === 'plane' ? 90 : /eurostar/i.test(r.transfer.label + (r.transfer.ops || []).join(' ')) ? 30 : 10;
+          if (dep - row.arrive < need) row.alerts.push({ level: 'warn', text: `Llegas con solo ${dep - row.arrive} min de margen (conviene ${need})` });
+        }
         start = dep;
       }
       if (arr != null && dep != null) {
@@ -152,12 +176,14 @@ export function buildSchedule(day, { fetchRoutes = true } = {}) {
     if (it.booked) row.booked = true;
     rows.push(row);
     t = row.end;
-    if (r.kind === 'transfer') prev = r.endLoc || prev;
-    else if (r.loc) prev = r.loc;
+    if (r.kind === 'transfer') { prev = r.endLoc || prev; prevPid = r.transfer.toId || null; curCity = r.transfer.to || curCity; }
+    else if (r.loc) { prev = r.loc; prevPid = destPid; }
   }
   const end = rows.length ? rows[rows.length - 1].end : t;
   const alerts = rows.reduce((n, r) => n + r.alerts.filter(a => a.level === 'danger' || a.level === 'warn').length, 0);
-  return { rows, end, walkKm: walkM / 1000, alertCount: alerts };
+  const totals = {};
+  for (const tr of trips) totals[tr.cur] = Math.round(((totals[tr.cur] || 0) + tr.amt) * 100) / 100;
+  return { rows, end, walkKm: walkM / 1000, alertCount: alerts, transport: { trips, totals, count: trips.length, est: trips.some(x => x.est) } };
 }
 
 // Ubicaciones dibujables (para mapa y optimización)

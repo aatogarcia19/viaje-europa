@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { get, all, update, useStore, me, setMe, status, pendingCount, sync, setCode, exportBackup, resetLocal } from '../lib/store.js';
 import { voices, play, unlock, rate } from '../lib/tts.js';
 import { offlineUrls, cachedFetch } from '../lib/mapcache.js';
 import Icon from '../components/Icon.jsx';
-import { Header, Field } from '../components/ui.jsx';
+import { Header, Field, money, go } from '../components/ui.jsx';
+import { DEFAULT_WALK_MAX, TRANSITOUS_SOURCES, useTransit, queueSize, tstatus } from '../lib/transit.js';
+import { tripTransport, computeRoutes } from '../lib/transport.js';
 
 const ls = { get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } }, set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch { /* */ } } };
 
@@ -73,6 +75,8 @@ export default function Ajustes() {
           <p className="hint">Sirve para saber quién hizo cada cambio y quién pagó por defecto.</p>
         </section>
 
+        <TransportSettings trip={trip} />
+
         <section className="block">
           <h2>Nombres de los viajeros</h2>
           <div className="grid2">
@@ -141,5 +145,53 @@ export default function Ajustes() {
         </section>
       </div>
     </div>
+  );
+}
+
+const WALK_OPTS = [1000, 1500, 2000, 2500, 3000];
+const km = m => `${(m / 1000).toLocaleString('es-GT', { maximumFractionDigits: 1 })} km`;
+
+function TransportSettings({ trip }) {
+  const sv = useStore(); const tv = useTransit();
+  const walkMax = trip.walkMax || DEFAULT_WALK_MAX;
+  const est = useMemo(() => tripTransport(), [sv, tv]); // eslint-disable-line
+  const [asked, setAsked] = useState(null);
+  const busy = queueSize();
+  const budget = (trip.budget || {})['Transporte local'];
+  const calc = () => {
+    if (!navigator.onLine) { setAsked({ n: 0, offline: true }); return; }
+    const before = tstatus.done;
+    setAsked({ n: computeRoutes(), before });
+  };
+  return (
+    <section className="block">
+      <h2><Icon name="metro" size={18} /> Transporte en las ciudades</h2>
+      <Field label="Sugerir caminar en tramos de hasta" hint="En cada tramo siempre verán cuánto es a pie (distancia y tiempo) y las opciones en metro, bus o tren con su precio. Ustedes deciden; esto solo cambia lo que la app sugiere.">
+        <div className="seg">{WALK_OPTS.map(m => <button key={m} className={walkMax === m ? 'on' : ''} onClick={() => update('trip', d => { d.walkMax = m; })}>{km(m)}</button>)}</div>
+      </Field>
+
+      <div className="ctr-card">
+        <div className="ctr-head">
+          <span><small>Transporte local estimado</small><b>según el plan de hoy</b></span>
+          <span className="ctr-total"><small>por persona</small><b>{money(est.totalQ)}</b></span>
+        </div>
+        <ul className="ctr-days">
+          {est.cities.map(c => (
+            <li key={c.city.id}>
+              <a href={`#/ciudad/${c.city.id}`} onClick={e => { e.preventDefault(); go(`/ciudad/${c.city.id}`); setTimeout(() => document.getElementById('transporte')?.scrollIntoView(), 300); }}>{c.city.flag} {c.city.name}</a>
+              <span>{c.trips.length ? `${c.trips.length} ${c.trips.length === 1 ? 'viaje' : 'viajes'}${c.cmp && c.cmp.best.id !== 'singles' ? ` · ${c.cmp.best.name}` : ''}` : 'a pie'}</span>
+              <b>{c.best ? `${c.est ? '≈ ' : ''}${money(c.best, c.cmp.cur)}` : '—'}</b>
+            </li>
+          ))}
+        </ul>
+        {budget ? <p className={`hint ${est.totalQ > budget ? 'warn' : ''}`}>Presupuesto del documento: {money(budget)} por persona{est.totalQ > budget ? ' (el plan actual lo pasa)' : ''}.</p> : null}
+        <div className="actions-row">
+          <button className="btn" onClick={calc} disabled={busy > 0}><Icon name="route" size={18} />{busy > 0 ? `Calculando… faltan ${busy}` : 'Calcular rutas de todo el viaje'}</button>
+        </div>
+        {asked && !busy ? <p className="hint">{asked.offline ? 'Sin conexión: inténtenlo con wifi.' : asked.n === 0 ? 'Todos los tramos ya estaban calculados.' : `Listo: ${tstatus.done - (asked.before || 0)} tramos calculados${tstatus.failed ? `, ${tstatus.failed} fallaron (vuelvan a intentarlo)` : ''}. Quedan guardados para usarlos sin conexión y en el otro teléfono.`}</p> : null}
+        <p className="hint">Háganlo con wifi después de cambiar el plan: así cada tramo tiene sus líneas, paradas y precios aunque no haya señal.</p>
+      </div>
+      <p className="leg-attr">Rutas de transporte: <a href={TRANSITOUS_SOURCES} target="_blank" rel="noreferrer">Transitous</a> (datos abiertos de cada operador). Metro de Madrid: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a>. Los horarios de 2027 aún no existen: se usan los de la misma semana de este año como referencia.</p>
+    </section>
   );
 }

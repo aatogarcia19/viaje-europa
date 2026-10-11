@@ -1,15 +1,17 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { get, all, put, remove, useStore, newId, me } from '../lib/store.js';
 import { fmtDate, todayISO } from '../lib/time.js';
 import Icon from '../components/Icon.jsx';
-import { Header, Sheet, Field, money, Empty } from '../components/ui.jsx';
+import { Header, Sheet, Field, money, Empty, go } from '../components/ui.jsx';
+import { tripTransport } from '../lib/transport.js';
 
 const SPLIT = { mitad: 'Mitad y mitad', pagador: 'Solo para quien pagó', otro: 'Todo para el otro' };
 
 export function toQ(e, rates) { return (Number(e.amount) || 0) * (rates[e.currency] || 1); }
 
 export default function Gastos() {
-  useStore();
+  const sv = useStore();
+  const tq = useMemo(() => tripTransport().totalQ, [sv]); // eslint-disable-line
   const trip = get('trip') || {};
   const rates = trip.rates || { EUR: 8.8, CHF: 9.5, GTQ: 1 };
   const [A, B] = trip.travelers || ['Viajero 1', 'Viajero 2'];
@@ -62,6 +64,7 @@ export default function Gastos() {
             })}
             {byCat.Otros ? <li><span className="b-name">Otros</span><span className="bar"><i style={{ width: '0%' }} /></span><span className="b-num">{money(Math.round(byCat.Otros / 2))}</span></li> : null}
           </ul>
+          {tq ? <p className="hint">Transporte local según el plan actual: ≈ {money(tq)} por persona. <button className="btn-plain inline-link" onClick={() => go('/ajustes')}>Ver por ciudad</button></p> : null}
           <p className="hint">Presupuesto del documento: {money(budgetPP)} por persona. Tipo de cambio: 1 € = Q{rates.EUR}, 1 CHF = Q{rates.CHF} (se cambia en Ajustes).</p>
         </section>
 

@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { get, all, update, useStore, newId } from '../lib/store.js';
 import { buildSchedule, mapPoints, MODE_LABEL } from '../lib/schedule.js';
-import { useRoutes, getRoute, decodePolyline, gmapsDir, gmapsTransit, bestOrder, haversine, geocode } from '../lib/geo.js';
+import { useRoutes, getRoute, decodePolyline, gmapsDir, bestOrder, haversine, geocode } from '../lib/geo.js';
+import { useTransit, isAutoMove, MODE_COLOR } from '../lib/transit.js';
+import { bestInsertIndex, mealInsertIndex } from '../lib/planner.js';
+import Leg, { chooseMove } from '../components/Leg.jsx';
 import { fmt, fmtDur, fmtDate, sunset, toMin, todayISO, nowMin } from '../lib/time.js';
 import { play, unlock, player, usePlayer } from '../lib/tts.js';
 import Icon, { modeIcon } from '../components/Icon.jsx';
 import MapView from '../components/MapView.jsx';
-import { Header, Sheet, Field, Alert, go, back, Empty, Toast } from '../components/ui.jsx';
+import { Header, Sheet, Field, Alert, go, back, Empty, Toast, money } from '../components/ui.jsx';
 import { planDay, usedPlaces, PACE } from '../lib/planner.js';
 import Weather from '../components/Weather.jsx';
 
 const CAT_ICON = { meal: 'meal', lodging: 'bed', transfer: 'ticket' };
 
 export default function Dia({ date }) {
-  const sv = useStore(); const rv = useRoutes(); usePlayer();
+  const sv = useStore(); const rv = useRoutes(); const tv = useTransit(); usePlayer();
   const dayId = 'd-' + date;
   const day = get(dayId);
   const days = all('day').sort((a, b) => a.date.localeCompare(b.date));
@@ -27,7 +30,7 @@ export default function Dia({ date }) {
   const played = useRef(new Set());
   const rowRefs = useRef({});
 
-  const sched = useMemo(() => day ? buildSchedule(day) : null, [day, sv, rv]); // eslint-disable-line
+  const sched = useMemo(() => day ? buildSchedule(day) : null, [day, sv, rv, tv]); // eslint-disable-line
   const cities = (day?.cities || []).map(id => ({ id, ...get(id) })).filter(c => c.name);
   const mainCity = cities[0];
   const color = (cities.find(c => c.id === cityFilter) || mainCity)?.color || '#15233f';
@@ -72,7 +75,12 @@ export default function Dia({ date }) {
   for (const r of sched.rows) {
     if (r.move && r.move.from && r.move.to) {
       const c = get(rowCity(r))?.color || color;
-      if (r.move.mode === 'walk') {
+      if (r.move.mode === 'pt' && r.move.opt) {
+        for (const l of r.move.opt.legs) {
+          if (l.mode === 'WALK') { if (l.a && l.b) lines.push({ coords: [l.a, l.b], color: c, weight: 3, dash: '2 7' }); }
+          else lines.push({ coords: decodePolyline(l.g), color: l.color || MODE_COLOR[l.mode] || c, weight: 5, halo: true });
+        }
+      } else if (r.move.mode === 'walk') {
         const rt = getRoute(r.move.from, r.move.to);
         lines.push(rt ? { coords: decodePolyline(rt.g), color: c, weight: 4, halo: true } : { coords: [[r.move.from.lat, r.move.from.lng], [r.move.to.lat, r.move.to.lng]], color: c, weight: 3, dash: '2 7' });
       } else lines.push({ coords: [[r.move.from.lat, r.move.from.lng], [r.move.to.lat, r.move.to.lng]], color: c, weight: 3, dash: '10 8', opacity: 0.7 });
@@ -86,6 +94,7 @@ export default function Dia({ date }) {
     update(dayId, d => { d.items = fn(d.items.slice()); });
     if (msg) setToast({ msg, undo: () => update(dayId, d => { d.items = before; }) });
   };
+  const chooseLeg = (i, c) => chooseMove(dayId, i, c);
   const move = (i, delta) => setItems(items => { const j = i + delta; if (j < 0 || j >= items.length) return items; [items[i], items[j]] = [items[j], items[i]]; return items; });
 
   const optimize = () => {
@@ -140,6 +149,7 @@ export default function Dia({ date }) {
         <button className="fact btn-plain" onClick={() => setSheet({ type: 'start' })}><Icon name="clock" size={16} /><span>Inicio <b>{day.start}</b></span></button>
         <div className="fact"><Icon name="today" size={16} /><span>Termina <b>{fmt(sched.end)}</b></span></div>
         <div className="fact"><Icon name="walk" size={16} /><span><b>{sched.walkKm.toFixed(1)} km</b> a pie</span></div>
+        {sched.transport.count ? <div className="fact"><Icon name="metro" size={16} /><span><b>{sched.transport.count}</b> {sched.transport.count === 1 ? 'viaje' : 'viajes'} · <b>≈ {Object.entries(sched.transport.totals).map(([cur, v]) => money(v, cur)).join(' + ')}</b> c/u</span></div> : null}
         {sun ? <div className="fact"><Icon name="sunset" size={16} /><span>Atardecer <b>{fmt(sun)}</b></span></div> : null}
         {mainCity ? <Weather city={mainCity} date={date} /> : null}
       </div>
@@ -163,19 +173,7 @@ export default function Dia({ date }) {
           const done = r.item.done;
           return (
             <li key={r.item.id} ref={el => { rowRefs.current[r.item.id] = el; }} className={`stop k-${r.kind} ${done ? 'done' : ''} ${current ? 'current' : ''} ${r.item.opt ? 'opt' : ''}`} style={{ '--c': c }}>
-              {(r.move || r.wait > 4) && (
-                <div className={`leg m-${r.move ? r.move.mode : 'wait'}`}>
-                  {r.move ? (
-                    <div className="leg-txt">
-                      <Icon name={modeIcon(r.move.mode)} size={16} />
-                      <span>{r.move.mode === 'walk' ? `${fmtDur(r.move.min)} a pie${r.move.km ? ` · ${r.move.km < 1 ? Math.round(r.move.km * 1000) + ' m' : r.move.km.toFixed(1) + ' km'}` : ''}${r.move.est ? ' (aprox.)' : ''}` : `${MODE_LABEL[r.move.mode] || r.move.mode} · ${fmtDur(r.move.min)}`}</span>
-                      {r.move.txt ? <small>{r.move.txt}</small> : null}
-                      {r.move.from && r.move.to && (r.move.mode !== 'walk' || (r.move.km || 0) > 1.2) ? <a className="leg-link" href={gmapsTransit(r.move.from, r.move.to)} target="_blank" rel="noreferrer"><Icon name="metro" size={14} />Ver en transporte</a> : null}
-                    </div>
-                  ) : null}
-                  {r.wait > 4 ? <div className="leg-wait"><Icon name="clock" size={14} /> Espera {fmtDur(r.wait)}</div> : null}
-                </div>
-              )}
+              {(r.move || r.wait > 4) ? <Leg row={r} onChoose={c => chooseLeg(i, c)} /> : null}
               <div className="stop-row">
                 <div className="t">
                   <b>{fmt(r.start)}</b>
@@ -233,7 +231,7 @@ export default function Dia({ date }) {
       </nav>
 
       {sheet?.type === 'item' && <ItemSheet day={day} dayId={dayId} index={sheet.index} row={sched.rows[sheet.index]} days={days} onClose={() => setSheet(null)} setToast={setToast} />}
-      {sheet?.type === 'add' && <AddSheet day={day} dayId={dayId} cities={cities} onClose={() => setSheet(null)} />}
+      {sheet?.type === 'add' && <AddSheet day={day} dayId={dayId} cities={cities} onClose={() => setSheet(null)} setToast={setToast} />}
       {sheet?.type === 'start' && <StartSheet day={day} dayId={dayId} onClose={() => setSheet(null)} />}
       {sheet?.type === 'plan' && <PlannerSheet day={day} dayId={dayId} cities={cities} onClose={() => setSheet(null)} setToast={setToast} />}
       {toast && <Toast {...toast} onDone={() => setToast(null)} />}
@@ -257,7 +255,7 @@ function ItemSheet({ day, dayId, index, row, days, onClose, setToast }) {
   const [f, setF] = useState({
     name: it.name || '', dur: row?.dur ?? it.dur ?? 30, fixed: it.fixed || '', note: it.note || '',
     booked: !!it.booked, ext: !!it.ext, opt: !!it.opt,
-    mode: it.move?.m || 'walk', min: it.move?.min ?? '', txt: it.move?.txt || ''
+    mode: isAutoMove(it.move) ? 'auto' : it.move.m, min: it.move?.min ?? '', txt: it.move?.txt || ''
   });
   const [target, setTarget] = useState('');
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
@@ -272,8 +270,9 @@ function ItemSheet({ day, dayId, index, row, days, onClose, setToast }) {
       x.booked = f.booked || undefined; if (!x.booked) delete x.booked;
       x.ext = f.ext || undefined; if (!x.ext) delete x.ext;
       x.opt = f.opt || undefined; if (!x.opt) delete x.opt;
-      if (f.mode === 'walk' && f.min === '' && !f.txt) delete x.move;
-      else x.move = { m: f.mode, ...(f.min !== '' ? { min: Number(f.min) } : {}), ...(f.txt ? { txt: f.txt } : {}) };
+      if (f.mode === 'auto') delete x.move;
+      else if (f.mode === 'pt') { /* se mantiene la línea elegida en el tramo */ }
+      else x.move = { m: f.mode, ...(f.min !== '' && f.mode !== 'walk' ? { min: Number(f.min) } : {}), ...(f.txt ? { txt: f.txt } : {}) };
     });
     onClose();
   };
@@ -310,14 +309,16 @@ function ItemSheet({ day, dayId, index, row, days, onClose, setToast }) {
       <fieldset className="field">
         <span className="field-label">Cómo llegar desde la parada anterior</span>
         <div className="seg wrap">
-          {['walk', 'metro', 'bus', 'tram', 'train', 'vaporetto', 'taxi'].map(m => (
-            <button key={m} className={f.mode === m ? 'on' : ''} onClick={() => set('mode', m)}><Icon name={modeIcon(m)} size={16} />{MODE_LABEL[m]}</button>
+          {[...(f.mode === 'pt' ? ['pt'] : []), 'auto', 'walk', 'metro', 'bus', 'tram', 'train', 'vaporetto', 'taxi'].map(m => (
+            <button key={m} className={f.mode === m ? 'on' : ''} onClick={() => set('mode', m)}><Icon name={m === 'auto' ? 'wand' : m === 'pt' ? 'metro' : modeIcon(m)} size={16} />{m === 'auto' ? 'automático' : m === 'pt' ? 'línea elegida' : MODE_LABEL[m]}</button>
           ))}
         </div>
-        <div className="grid2">
-          <input type="number" inputMode="numeric" placeholder={f.mode === 'walk' ? 'Automático' : 'Minutos'} value={f.min} onChange={e => set('min', e.target.value)} aria-label="Minutos de traslado" />
-          <input placeholder="Línea / indicación" value={f.txt} onChange={e => set('txt', e.target.value)} aria-label="Indicación" />
-        </div>
+        {f.mode === 'auto' ? <p className="hint">La app propone a pie o transporte según la distancia; en el tramo pueden ver y elegir las líneas.</p> : f.mode === 'pt' ? <p className="hint">Usan la línea que eligieron en el tramo. Para cambiarla, toquen el tramo en el día.</p> : (
+          <div className="grid2">
+            <input type="number" inputMode="numeric" placeholder={f.mode === 'walk' ? 'Calculado' : 'Minutos'} value={f.mode === 'walk' ? '' : f.min} disabled={f.mode === 'walk'} onChange={e => set('min', e.target.value)} aria-label="Minutos de traslado" />
+            <input placeholder="Línea / indicación" value={f.txt} onChange={e => set('txt', e.target.value)} aria-label="Indicación" />
+          </div>
+        )}
       </fieldset>
       {it.t === 'place' && (
         <div className="toggles">
@@ -340,7 +341,7 @@ function ItemSheet({ day, dayId, index, row, days, onClose, setToast }) {
   );
 }
 
-function AddSheet({ day, dayId, cities, onClose }) {
+function AddSheet({ day, dayId, cities, onClose, setToast }) {
   const [tab, setTab] = useState('catalogo');
   const [q, setQ] = useState('');
   const [onlyFree, setOnlyFree] = useState(false);
@@ -350,8 +351,19 @@ function AddSheet({ day, dayId, cities, onClose }) {
     .filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase()))
     .filter(p => !onlyFree || !p.price)
     .sort((a, b) => (a.pri || 3) - (b.pri || 3) || a.name.localeCompare(b.name));
-  const addPlace = p => { update(dayId, d => { d.items.push({ id: newId('i'), t: 'place', p: p.id }); }); onClose(); };
-  const addMeal = name => { update(dayId, d => { d.items.push({ id: newId('i'), t: 'meal', name, dur: name === 'Descanso' ? 45 : 60 }); }); onClose(); };
+  // Inserta en el mejor punto del día y avisa a qué hora quedó (con deshacer)
+  const insertAt = (item, i) => {
+    const before = [...day.items];
+    const idx = Math.max(0, Math.min(i, before.length));
+    update(dayId, d => { d.items.splice(idx, 0, item); });
+    const s = buildSchedule({ ...day, items: [...before.slice(0, idx), item, ...before.slice(idx)] }, { fetchRoutes: false });
+    const r = s.rows[idx];
+    const pos = idx >= before.length ? 'al final del día' : idx === 0 ? 'al inicio del día' : `después de ${s.rows[idx - 1]?.name || 'la parada anterior'}`;
+    setToast && setToast({ msg: `Agregado a las ${r ? fmt(r.start) : '?'}, ${pos}.`, undo: () => update(dayId, d => { d.items = before; }) });
+    onClose();
+  };
+  const addPlace = p => { const it = { id: newId('i'), t: 'place', p: p.id }; insertAt(it, bestInsertIndex(day, it).i); };
+  const addMeal = name => insertAt({ id: newId('i'), t: 'meal', name, dur: name === 'Descanso' ? 45 : 60 }, mealInsertIndex(day, name));
 
   const [cName, setCName] = useState('');
   const [cQ, setCQ] = useState('');
@@ -362,8 +374,8 @@ function AddSheet({ day, dayId, cities, onClose }) {
   const search = async () => { setBusy(true); try { setRes(await geocode(cQ, center)); } catch { setRes([]); } setBusy(false); };
   const addCustom = () => {
     if (!cName || !pick) return;
-    update(dayId, d => { d.items.push({ id: newId('i'), t: 'custom', name: cName, lat: pick.lat, lng: pick.lng, dur: 30 }); });
-    onClose();
+    const it = { id: newId('i'), t: 'custom', name: cName, lat: pick.lat, lng: pick.lng, dur: 30 };
+    insertAt(it, bestInsertIndex(day, it).i);
   };
 
   return (
@@ -378,6 +390,7 @@ function AddSheet({ day, dayId, cities, onClose }) {
           <input placeholder="Buscar lugar" value={q} onChange={e => setQ(e.target.value)} aria-label="Buscar lugar" />
           <label className="tgl"><input type="checkbox" checked={onlyFree} onChange={e => setOnlyFree(e.target.checked)} /> Solo gratis</label>
         </div>
+        <p className="hint">Se agrega donde menos tiempo le suma al día.</p>
         <ul className="pick-list">
           {places.map(p => (
             <li key={p.id}>
@@ -393,7 +406,7 @@ function AddSheet({ day, dayId, cities, onClose }) {
       {tab === 'comida' && (
         <div className="stack">
           {['Desayuno', 'Almuerzo', 'Cena', 'Café / merienda', 'Descanso'].map(n => <button key={n} className="btn wide" onClick={() => addMeal(n)}><Icon name={n === 'Descanso' ? 'rest' : 'meal'} size={18} />{n}</button>)}
-          <p className="hint">Se agrega al final del día; súbelo a su lugar con las flechas en modo edición.</p>
+          <p className="hint">Se acomoda sola en la hora típica del país (en España se come y se cena más tarde). Pueden moverla con las flechas en modo edición.</p>
         </div>
       )}
       {tab === 'propio' && (

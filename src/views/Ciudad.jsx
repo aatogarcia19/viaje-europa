@@ -8,6 +8,7 @@ import { Header, Sheet, Field, back, go, Empty, Toast } from '../components/ui.j
 import { planCity } from '../lib/planner.js';
 import { PlannerOptions } from './Dia.jsx';
 import { CAT, PRI, priceLabel } from './Lugar.jsx';
+import CityTransport from '../components/CityTransport.jsx';
 
 export default function Ciudad({ id, query = {} }) {
   useStore();
@@ -76,11 +77,11 @@ export default function Ciudad({ id, query = {} }) {
           <button className="btn wide" onClick={() => setPlan(true)}><Icon name="wand" size={18} />Armar los días de {c.name} por mí</button>
         </section>
 
-        {c.transport && c.transport.length ? (
+        <CityTransport city={c} cityId={id} setToast={setToast} />
+        {c.tips && c.tips.length ? (
           <section className="block">
-            <h2><Icon name="metro" size={18} /> Moverse</h2>
-            <ul className="tips">{c.transport.map((t, i) => <li key={i}>{t}</li>)}</ul>
-            {c.tips && c.tips.length ? <ul className="tips">{c.tips.map((t, i) => <li key={i}>{t}</li>)}</ul> : null}
+            <h2><Icon name="info" size={18} /> Consejos de la ciudad</h2>
+            <ul className="tips">{c.tips.map((t, i) => <li key={i}>{t}</li>)}</ul>
           </section>
         ) : null}
 

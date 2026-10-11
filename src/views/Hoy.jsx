@@ -8,14 +8,16 @@ import Icon, { modeIcon } from '../components/Icon.jsx';
 import { Header, go } from '../components/ui.jsx';
 import { Ticket } from './Viaje.jsx';
 import Weather from '../components/Weather.jsx';
+import Leg, { chooseMove } from '../components/Leg.jsx';
+import { useTransit } from '../lib/transit.js';
 
 export default function Hoy() {
-  useStore(); const rv = useRoutes();
+  useStore(); const rv = useRoutes(); const tv = useTransit();
   const trip = get('trip') || {};
   const today = todayISO();
   const days = all('day').sort((a, b) => a.date.localeCompare(b.date));
   const day = days.find(d => d.date === today);
-  const sched = useMemo(() => day ? buildSchedule(day) : null, [day, rv]); // eslint-disable-line
+  const sched = useMemo(() => day ? buildSchedule(day) : null, [day, rv, tv]); // eslint-disable-line
 
   if (!trip.start) return <><Header title="Hoy" /><p className="pad hint">Cargando el viaje…</p></>;
 
@@ -110,6 +112,7 @@ export default function Hoy() {
           ) : <div className="board-line"><small>Fin del día</small><b>No hay más paradas</b></div>}
           {target?.alerts?.length ? <div className={`board-alert ${target.alerts[0].level}`}>{target.alerts[0].text}</div> : null}
         </div>
+        {nxt?.move ? <div className="hoy-leg"><Leg row={nxt} onChoose={c => chooseMove('d-' + today, nextIdx, c)} /></div> : null}
         <div className="actions-row">
           {target?.loc ? <a className="btn primary" href={gmapsDir(target.loc, target.move?.mode || 'walk')} target="_blank" rel="noreferrer"><Icon name="nav" size={18} />Cómo llegar</a> : null}
           {target?.place?.audio ? <button className="btn" onClick={() => { unlock(); play(target.item.p, target.place.name, target.place.audio); }}><Icon name="play" size={18} />Escuchar</button> : null}

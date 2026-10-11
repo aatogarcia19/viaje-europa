@@ -63,4 +63,4 @@ export default function Icon({ name, size = 20, className = '', title }) {
   );
 }
 
-export const modeIcon = m => ({ walk: 'walk', metro: 'metro', train: 'train', tram: 'tram', bus: 'bus', plane: 'plane', vaporetto: 'vaporetto', taxi: 'taxi' }[m] || 'walk');
+export const modeIcon = m => ({ walk: 'walk', metro: 'metro', train: 'train', tram: 'tram', bus: 'bus', plane: 'plane', vaporetto: 'vaporetto', taxi: 'taxi', pt: 'metro', 'pt-est': 'metro' }[m] || 'walk');

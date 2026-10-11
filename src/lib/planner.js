@@ -162,10 +162,9 @@ function toItems(route, seg, pace, wd) {
   for (const node of route) {
     if (node.type === 'meal') { const s = starts[mi++] ?? node.ws; out.push({ id: newId('i'), t: 'meal', name: node.name, dur: node.dur, fixed: fmt(Math.ceil(s / 5) * 5) }); continue; }
     const p = node.p;
-    const lg = leg(loc, p, pace);
     const it = { id: newId('i'), t: 'place', p: p.id };
     if (node.dur !== p.dur) it.dur = node.dur;
-    if (lg.mode === 'metro') it.move = { m: 'metro', min: lg.min, txt: 'Más de 2 km: metro o bus. Toca "Ver en transporte" para la mejor línea.' };
+    // el tramo queda en automático: la app elige a pie o transporte con las líneas reales
     out.push(it);
     loc = p;
   }
@@ -297,4 +296,44 @@ export function planCity(cityId, opts) {
     result['d-' + d.date] = planDay(d, { ...opts, onlyCity: cityId }, used, extra);
   }
   return result;
+}
+
+// ——— Agregar una parada en el mejor punto del día ———
+const scoreOf = s => s.rows.reduce((acc, r) => {
+  for (const a of r.alerts) acc += a.level === 'danger' ? 300 : a.level === 'warn' ? 45 : 0;
+  return acc;
+}, 0);
+
+export function bestInsertIndex(day, item) {
+  const items = day.items || [];
+  const base = buildSchedule(day, { fetchRoutes: false });
+  const basePenalty = scoreOf(base);
+  let best = { i: items.length, score: Infinity };
+  for (let i = 0; i <= items.length; i++) {
+    if (i === 0 && items.length && isAnchor(items[0])) continue;
+    const cand = { ...day, items: [...items.slice(0, i), item, ...items.slice(i)] };
+    const s = buildSchedule(cand, { fetchRoutes: false });
+    const score = (s.end - base.end) + (scoreOf(s) - basePenalty) + (s.walkKm - base.walkKm) * 4;
+    if (score < best.score - 0.5) best = { i, score, sched: s };
+  }
+  return best;
+}
+
+const MEAL_TARGET = {
+  'España': { Desayuno: '08:30', Almuerzo: '13:45', Cena: '20:45', 'Café / merienda': '17:30', Descanso: '15:30' },
+  'Italia': { Desayuno: '08:00', Almuerzo: '12:45', Cena: '19:45', 'Café / merienda': '16:30', Descanso: '15:00' },
+  default: { Desayuno: '08:00', Almuerzo: '12:30', Cena: '19:30', 'Café / merienda': '16:30', Descanso: '15:00' }
+};
+export function mealInsertIndex(day, name) {
+  const city = get((day.cities || [])[0]) || {};
+  const tgt = toMin((MEAL_TARGET[city.country] || MEAL_TARGET.default)[name] || '13:00');
+  const s = buildSchedule(day, { fetchRoutes: false });
+  let bi = s.rows.length, bd = Infinity;
+  s.rows.forEach((r, i) => {
+    // insertar después de la fila i: empieza cuando termina r
+    const d = Math.abs(r.end - tgt);
+    if (d < bd && !(s.rows[i + 1] && s.rows[i + 1].kind === 'transfer' && s.rows[i + 1].start - r.end < 60)) { bd = d; bi = i + 1; }
+  });
+  if (s.rows.length && s.rows[0].start > tgt) bi = isAnchor(day.items[0]) ? 1 : 0;
+  return bi;
 }

@@ -31,6 +31,47 @@ export function decodePolyline(str, precision = 5) {
   return coords;
 }
 
+export function encodePolyline(coords, precision = 5) {
+  const f = 10 ** precision;
+  let out = '', pl = 0, pg = 0;
+  const enc = v => { v = v < 0 ? ~(v << 1) : v << 1; let s = ''; while (v >= 0x20) { s += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5; } return s + String.fromCharCode(v + 63); };
+  for (const [la, lo] of coords) {
+    const a = Math.round(la * f), b = Math.round(lo * f);
+    out += enc(a - pl) + enc(b - pg);
+    pl = a; pg = b;
+  }
+  return out;
+}
+
+// Douglas-Peucker en grados (tolerancia ~0,0001° ≈ 10 m)
+export function simplify(pts, tol = 0.0001) {
+  if (pts.length <= 2) return pts;
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [s, e] = stack.pop();
+    const [ax, ay] = pts[s], [bx, by] = pts[e];
+    const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1e-12;
+    let md = -1, mi = -1;
+    for (let i = s + 1; i < e; i++) {
+      const [px, py] = pts[i];
+      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / L));
+      const qx = ax + t * dx - px, qy = ay + t * dy - py;
+      const d = qx * qx + qy * qy;
+      if (d > md) { md = d; mi = i; }
+    }
+    if (md > tol * tol) { keep[mi] = 1; stack.push([s, mi], [mi, e]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+
+export function pathLength(pts) {
+  let d = 0;
+  for (let i = 1; i < pts.length; i++) d += haversine({ lat: pts[i - 1][0], lng: pts[i - 1][1] }, { lat: pts[i][0], lng: pts[i][1] });
+  return d;
+}
+
 const RKEY = 've.routes.v1';
 let routes = {};
 try { routes = JSON.parse(localStorage.getItem(RKEY) || '{}'); } catch { routes = {}; }
@@ -133,7 +174,7 @@ export function bestOrder(points, start, end) {
 }
 
 export function gmapsDir(dest, mode = 'walking') {
-  const m = { walk: 'walking', walking: 'walking', metro: 'transit', bus: 'transit', tram: 'transit', train: 'transit', vaporetto: 'transit', transit: 'transit', taxi: 'driving' }[mode] || 'walking';
+  const m = { walk: 'walking', walking: 'walking', metro: 'transit', bus: 'transit', tram: 'transit', train: 'transit', vaporetto: 'transit', transit: 'transit', pt: 'transit', 'pt-est': 'transit', taxi: 'driving' }[mode] || 'walking';
   return `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lng}&travelmode=${m}`;
 }
 export function gmapsTransit(from, to) {
