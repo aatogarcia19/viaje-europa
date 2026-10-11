@@ -6,6 +6,7 @@ import Icon from '../components/Icon.jsx';
 import { Header, Field, money, go } from '../components/ui.jsx';
 import { DEFAULT_WALK_MAX, TRANSITOUS_SOURCES, useTransit, queueSize, tstatus } from '../lib/transit.js';
 import { tripTransport, computeRoutes } from '../lib/transport.js';
+import { ASSISTANT_URL } from '../config.js';
 
 const ls = { get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } }, set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch { /* */ } } };
 
@@ -73,6 +74,12 @@ export default function Ajustes() {
           <h2><Icon name="info" size={18} /> ¿Quién usa este teléfono?</h2>
           <div className="seg">{(trip.travelers || []).map(t => <button key={t} className={me() === t ? 'on' : ''} onClick={() => setMe(t)}>{t}</button>)}</div>
           <p className="hint">Sirve para saber quién hizo cada cambio y quién pagó por defecto.</p>
+        </section>
+
+        <section className="block">
+          <h2><Icon name="wand" size={18} /> Asistente de Claude</h2>
+          <p className="hint">Pregúntenle a Claude sobre el plan o pídanle cambios: lee el viaje y deja propuestas que ustedes aplican con un toque. Se abre en Claude con la cuenta de Ademir y necesita internet.</p>
+          <a className="btn wide" href={ASSISTANT_URL} target="_blank" rel="noreferrer"><Icon name="ext" size={18} />Abrir el asistente</a>
         </section>
 
         <TransportSettings trip={trip} />

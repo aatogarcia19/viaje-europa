@@ -10,6 +10,7 @@ import { Ticket } from './Viaje.jsx';
 import Weather from '../components/Weather.jsx';
 import Leg, { chooseMove } from '../components/Leg.jsx';
 import { useTransit } from '../lib/transit.js';
+import { ASSISTANT_URL } from '../config.js';
 
 export default function Hoy() {
   useStore(); const rv = useRoutes(); const tv = useTransit();
@@ -68,6 +69,7 @@ export default function Hoy() {
             <div className="stack">
               <button className="btn wide" onClick={() => go('/dia/2027-06-04')}><Icon name="route" size={18} />Ver el primer día en Madrid</button>
               <button className="btn wide" onClick={() => go('/ciudad/c-madrid')}><Icon name="star" size={18} />Catálogo de Madrid con audioguías</button>
+              <a className="btn wide" href={ASSISTANT_URL} target="_blank" rel="noreferrer"><Icon name="wand" size={18} />Preguntarle a Claude sobre el plan</a>
             </div>
           </section>
         </div>

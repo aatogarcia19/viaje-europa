@@ -18,3 +18,6 @@ export const SAT_LABELS = [
 export const SAT_ATTR = 'Imágenes © Esri, Maxar, Earthstar Geographics';
 
 export const ROUTER_URL = 'https://routing.openstreetmap.de/routed-foot/route/v1/driving/';
+
+// Asistente de Claude (página privada en la cuenta de Claude de Ademir)
+export const ASSISTANT_URL = 'https://claude.ai/artifact/XysteyDjyV5UdM6RcKKWeo';
