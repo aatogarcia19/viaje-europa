@@ -2,7 +2,8 @@
 // Fuentes: CRTM/Metro de Madrid, TMB, RATP/IDFM, STIB, GVB, ZVV (precios desde 13-12-2026), ACTV, ATAC.
 
 const r2 = n => Math.round(n * 100) / 100;
-const AIR = /aeropuerto|aeroport|airport|a[ée]roport|orly|charles de gaulle|schiphol|flughafen|marco polo|fiumicino/i;
+// Ojo: «Charles de Gaulle – Étoile» es una estación del centro de París, no el aeropuerto
+const AIR = /aeropuerto|airport|a[ée]roport|orly\s*[1-4]|charles de gaulle\s*[12t]|\bcdg\b|schiphol|flughafen|marco polo|fiumicino/i;
 
 const name = l => `${l.from || ''} ${l.to || ''}`;
 

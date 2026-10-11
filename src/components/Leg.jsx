@@ -92,9 +92,11 @@ export default function Leg({ row, onChoose, editable = true }) {
   if (mv) {
     if (mv.mode === 'walk') {
       main = <><Icon name="walk" size={16} /><span><b>{fmtDur(mv.min)} a pie</b> · {dist(mv.km)}{mv.est ? ' (aprox.)' : ''}</span></>;
-      const s = mv.suggest || best;
+      const cand = mv.suggest || best;
+      const s = cand && cand.min < mv.walkMin ? cand : null; // solo si en transporte se llega antes
       if (s) alt = <>o <Badges opt={s} /> {optTitle(s).toLowerCase()} · {fmtDur(s.min)}{fares[s.sig] ? ` · ${fareTxt(fares[s.sig])}` : ''}</>;
       else if (pending && mv.km >= 0.6) alt = <>Buscando transporte…</>;
+      else if (cand) alt = <>En transporte no se llega antes ({fmtDur(cand.min)})</>;
     } else if (mv.mode === 'pt') {
       main = <><Badges opt={mv.opt} /><span><b>{optTitle(mv.opt)}</b> · {fmtDur(mv.min)}{mv.fare ? ` · ${fareTxt(mv.fare)}` : ''}</span></>;
       alt = <>a pie serían {fmtDur(mv.walkMin)} · {dist(mv.km)}</>;

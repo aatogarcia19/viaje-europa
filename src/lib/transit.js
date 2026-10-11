@@ -72,7 +72,7 @@ export function parsePlan(j) {
       const g = simplify(pts.map(([a, b]) => [Math.round(a * 1e5) / 1e5, Math.round(b * 1e5) / 1e5]));
       legs.push({
         mode: l.mode, line: l.displayName || l.routeShortName || '', color: l.routeColor ? '#' + l.routeColor : null, text: l.routeTextColor ? '#' + l.routeTextColor : null,
-        head: l.headsign || '', from: placeName(l.from) || '', to: placeName(l.to) || '', stops: (l.intermediateStops || []).length + 1,
+        head: /^[A-Z]{4}$/.test(l.headsign || '') ? '' : (l.headsign || ''), // los RER de París traen códigos de misión (VICK, ROMI…) from: placeName(l.from) || '', to: placeName(l.to) || '', stops: (l.intermediateStops || []).length + 1,
         min: Math.max(1, Math.round((l.duration || 0) / 60)), km: Math.round(pathLength(pts) / 100) / 10, agency: l.agencyName || '', g: encodePolyline(g)
       });
     }
