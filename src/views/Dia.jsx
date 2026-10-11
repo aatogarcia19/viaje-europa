@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { get, all, update, useStore, newId } from '../lib/store.js';
 import { buildSchedule, mapPoints, MODE_LABEL } from '../lib/schedule.js';
-import { useRoutes, getRoute, decodePolyline, gmapsDir, bestOrder, haversine, geocode } from '../lib/geo.js';
+import { useRoutes, getRoute, decodePolyline, gmapsDir, gmapsTransit, bestOrder, haversine, geocode } from '../lib/geo.js';
 import { fmt, fmtDur, fmtDate, sunset, toMin, todayISO, nowMin } from '../lib/time.js';
 import { play, unlock, player, usePlayer } from '../lib/tts.js';
 import Icon, { modeIcon } from '../components/Icon.jsx';
 import MapView from '../components/MapView.jsx';
-import { Header, Sheet, Field, Alert, go, back, Empty } from '../components/ui.jsx';
+import { Header, Sheet, Field, Alert, go, back, Empty, Toast } from '../components/ui.jsx';
+import { planDay, usedPlaces, PACE } from '../lib/planner.js';
 import Weather from '../components/Weather.jsx';
 
 const CAT_ICON = { meal: 'meal', lodging: 'bed', transfer: 'ticket' };
@@ -147,10 +148,9 @@ export default function Dia({ date }) {
         <button className={`btn ${guide ? 'primary' : ''}`} onClick={() => { unlock(); setGuide(!guide); }} aria-pressed={guide}>
           <Icon name="audio" size={18} />{guide ? 'Modo guía activo' : 'Modo guía'}
         </button>
-        {edit ? <>
-          <button className="btn" onClick={optimize}><Icon name="wand" size={18} />Optimizar orden</button>
-          <button className="btn" onClick={() => setSheet({ type: 'add' })}><Icon name="plus" size={18} />Agregar</button>
-        </> : <button className="btn" onClick={() => setSheet({ type: 'add' })}><Icon name="plus" size={18} />Agregar parada</button>}
+        <button className="btn" onClick={() => setSheet({ type: 'plan' })}><Icon name="wand" size={18} />Armar el día por mí</button>
+        {edit ? <button className="btn" onClick={optimize}><Icon name="route" size={18} />Optimizar orden</button> : null}
+        <button className="btn" onClick={() => setSheet({ type: 'add' })}><Icon name="plus" size={18} />Agregar parada</button>
       </div>
       {guide ? <p className="hint">Con la app abierta, la audioguía suena sola al llegar a cada lugar. Mantén la pantalla encendida.</p> : null}
       {sched.alertCount ? <p className="hint warn"><Icon name="warn" size={15} /> {sched.alertCount} {sched.alertCount === 1 ? 'aviso' : 'avisos'} de horario en este día.</p> : null}
@@ -170,6 +170,7 @@ export default function Dia({ date }) {
                       <Icon name={modeIcon(r.move.mode)} size={16} />
                       <span>{r.move.mode === 'walk' ? `${fmtDur(r.move.min)} a pie${r.move.km ? ` · ${r.move.km < 1 ? Math.round(r.move.km * 1000) + ' m' : r.move.km.toFixed(1) + ' km'}` : ''}${r.move.est ? ' (aprox.)' : ''}` : `${MODE_LABEL[r.move.mode] || r.move.mode} · ${fmtDur(r.move.min)}`}</span>
                       {r.move.txt ? <small>{r.move.txt}</small> : null}
+                      {r.move.from && r.move.to && (r.move.mode !== 'walk' || (r.move.km || 0) > 1.2) ? <a className="leg-link" href={gmapsTransit(r.move.from, r.move.to)} target="_blank" rel="noreferrer"><Icon name="metro" size={14} />Ver en transporte</a> : null}
                     </div>
                   ) : null}
                   {r.wait > 4 ? <div className="leg-wait"><Icon name="clock" size={14} /> Espera {fmtDur(r.wait)}</div> : null}
@@ -234,17 +235,8 @@ export default function Dia({ date }) {
       {sheet?.type === 'item' && <ItemSheet day={day} dayId={dayId} index={sheet.index} row={sched.rows[sheet.index]} days={days} onClose={() => setSheet(null)} setToast={setToast} />}
       {sheet?.type === 'add' && <AddSheet day={day} dayId={dayId} cities={cities} onClose={() => setSheet(null)} />}
       {sheet?.type === 'start' && <StartSheet day={day} dayId={dayId} onClose={() => setSheet(null)} />}
+      {sheet?.type === 'plan' && <PlannerSheet day={day} dayId={dayId} cities={cities} onClose={() => setSheet(null)} setToast={setToast} />}
       {toast && <Toast {...toast} onDone={() => setToast(null)} />}
-    </div>
-  );
-}
-
-function Toast({ msg, undo, onDone }) {
-  useEffect(() => { const t = setTimeout(onDone, 6000); return () => clearTimeout(t); }, [msg]); // eslint-disable-line
-  return (
-    <div className="toast" role="status">
-      <span>{msg}</span>
-      {undo ? <button className="btn-plain" onClick={() => { undo(); onDone(); }}>Deshacer</button> : null}
     </div>
   );
 }
@@ -416,6 +408,45 @@ function AddSheet({ day, dayId, cities, onClose }) {
           <button className="btn primary wide" onClick={addCustom} disabled={!cName || !pick}>Agregar punto</button>
         </div>
       )}
+    </Sheet>
+  );
+}
+
+export function PlannerOptions({ o, setO }) {
+  const set = (k, v) => setO(x => ({ ...x, [k]: v }));
+  return (
+    <>
+      <Field label="Ritmo">
+        <div className="seg">{Object.entries(PACE).map(([k, v]) => <button key={k} className={o.pace === k ? 'on' : ''} onClick={() => set('pace', k)}>{v.label}</button>)}</div>
+      </Field>
+      <Field label="Entradas">
+        <div className="seg wrap">
+          {[['gratis', 'Solo gratis'], ['imprescindibles', 'Gratis + imprescindibles'], ['todo', 'Todo']].map(([k, l]) => <button key={k} className={o.tickets === k ? 'on' : ''} onClick={() => set('tickets', k)}>{l}</button>)}
+        </div>
+      </Field>
+      <div className="grid2">
+        <Field label="Terminar a las"><input type="time" value={o.end} onChange={e => set('end', e.target.value)} /></Field>
+        <label className="tgl"><input type="checkbox" checked={o.meals} onChange={e => set('meals', e.target.checked)} /> Incluir almuerzo y cena</label>
+      </div>
+    </>
+  );
+}
+
+function PlannerSheet({ day, dayId, onClose, setToast }) {
+  const [o, setO] = useState({ pace: 'normal', tickets: 'imprescindibles', end: '22:30', meals: true, repeat: false });
+  const run = () => {
+    const used = o.repeat ? new Set() : usedPlaces([dayId]);
+    const res = planDay(day, o, used);
+    const before = day.items;
+    update(dayId, d => { d.items = res.items; });
+    setToast({ msg: res.added ? `Día armado con ${res.added} lugares.` : 'No encontré lugares que quepan en el tiempo libre de este día.', undo: () => update(dayId, d => { d.items = before; }) });
+    onClose();
+  };
+  return (
+    <Sheet open title="Armar el día por mí" onClose={onClose} footer={<button className="btn primary wide" onClick={run}><Icon name="wand" size={18} />Armar el día</button>}>
+      <p className="hint">Elige los mejores lugares del catálogo que caben en el tiempo libre, respetando horarios de apertura y las horas de comida del país, y los ordena para caminar lo menos posible. Se quedan los trenes, vuelos, el alojamiento y todo lo que tenga hora fija. Lo puedes deshacer.</p>
+      <PlannerOptions o={o} setO={setO} />
+      <label className="tgl"><input type="checkbox" checked={o.repeat} onChange={e => setO(x => ({ ...x, repeat: e.target.checked }))} /> Permitir lugares que ya están en otros días</label>
     </Sheet>
   );
 }

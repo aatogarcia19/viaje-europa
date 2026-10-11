@@ -124,3 +124,13 @@ export const money = (n, cur = 'GTQ') => {
   const s = v.toLocaleString('es-GT', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
   return cur === 'GTQ' ? `Q${s}` : cur === 'EUR' ? `${s} €` : `${s} ${cur}`;
 };
+
+export function Toast({ msg, undo, onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 7000); return () => clearTimeout(t); }, [msg]); // eslint-disable-line
+  return (
+    <div className="toast" role="status">
+      <span>{msg}</span>
+      {undo ? <button className="btn-plain" onClick={() => { undo(); onDone(); }}>Deshacer</button> : null}
+    </div>
+  );
+}

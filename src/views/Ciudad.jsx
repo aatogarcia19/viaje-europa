@@ -4,7 +4,9 @@ import { fmtDate, fmtDur } from '../lib/time.js';
 import { geocode, gmapsDir } from '../lib/geo.js';
 import Icon from '../components/Icon.jsx';
 import MapView from '../components/MapView.jsx';
-import { Header, Sheet, Field, back, go, Empty } from '../components/ui.jsx';
+import { Header, Sheet, Field, back, go, Empty, Toast } from '../components/ui.jsx';
+import { planCity } from '../lib/planner.js';
+import { PlannerOptions } from './Dia.jsx';
 import { CAT, PRI, priceLabel } from './Lugar.jsx';
 
 export default function Ciudad({ id, query = {} }) {
@@ -16,6 +18,8 @@ export default function Ciudad({ id, query = {} }) {
   const [editLodging, setEditLodging] = useState(false);
   const [addPlace, setAddPlace] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [plan, setPlan] = useState(false);
+  const [toast, setToast] = useState(null);
   useEffect(() => { if (query.aloj) setEditLodging(true); }, [query.aloj]);
   if (!c) return <><Header title="Ciudad" onBack={() => back()} /><Empty title="Esta ciudad no existe" /></>;
 
@@ -69,6 +73,7 @@ export default function Ciudad({ id, query = {} }) {
           <ul className="links">
             {days.map(d => <li key={d.date}><button className="btn-plain link" onClick={() => go(`/dia/${d.date}`)}><b>{fmtDate(d.date)}</b> {d.title}</button></li>)}
           </ul>
+          <button className="btn wide" onClick={() => setPlan(true)}><Icon name="wand" size={18} />Armar los días de {c.name} por mí</button>
         </section>
 
         {c.transport && c.transport.length ? (
@@ -113,6 +118,8 @@ export default function Ciudad({ id, query = {} }) {
       </div>
       {editLodging && c.lodging !== null && <LodgingSheet city={c} id={id} onClose={() => setEditLodging(false)} />}
       {addPlace && <NewPlaceSheet city={c} id={id} onClose={() => setAddPlace(false)} />}
+      {plan && <CityPlanSheet city={c} id={id} onClose={() => setPlan(false)} setToast={setToast} />}
+      {toast && <Toast {...toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
@@ -181,6 +188,28 @@ function NewPlaceSheet({ city, id, onClose }) {
         <Field label="Duración (min)"><input type="number" inputMode="numeric" value={f.dur} onChange={e => set('dur', e.target.value)} /></Field>
       </div>
       <Field label="Descripción"><textarea rows={2} value={f.desc} onChange={e => set('desc', e.target.value)} /></Field>
+    </Sheet>
+  );
+}
+
+function CityPlanSheet({ city, id, onClose, setToast }) {
+  const [o, setO] = useState({ pace: 'normal', tickets: 'imprescindibles', end: '22:30', meals: true });
+  const run = () => {
+    const res = planCity(id, o);
+    const before = {};
+    let added = 0;
+    for (const [dayId, r] of Object.entries(res)) {
+      before[dayId] = get(dayId).items;
+      update(dayId, d => { d.items = r.items; });
+      added += r.added;
+    }
+    setToast({ msg: `Listo: ${added} lugares repartidos en ${Object.keys(res).length} días.`, undo: () => { for (const [dayId, items] of Object.entries(before)) update(dayId, d => { d.items = items; }); } });
+    onClose();
+  };
+  return (
+    <Sheet open title={`Armar ${city.name} por mí`} onClose={onClose} footer={<button className="btn primary wide" onClick={run}><Icon name="wand" size={18} />Armar los días</button>}>
+      <p className="hint">Reparte lo mejor del catálogo entre los días que pasan en {city.name}, sin repetir lugares, agrupando lo que queda cerca y respetando horarios. Se quedan los trenes, vuelos, alojamiento y lo que tenga hora fija. Las partes de otros días que sean de otra ciudad no se tocan. Lo puedes deshacer.</p>
+      <PlannerOptions o={o} setO={setO} />
     </Sheet>
   );
 }

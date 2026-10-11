@@ -136,6 +136,9 @@ export function gmapsDir(dest, mode = 'walking') {
   const m = { walk: 'walking', walking: 'walking', metro: 'transit', bus: 'transit', tram: 'transit', train: 'transit', vaporetto: 'transit', transit: 'transit', taxi: 'driving' }[mode] || 'walking';
   return `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lng}&travelmode=${m}`;
 }
+export function gmapsTransit(from, to) {
+  return `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=transit`;
+}
 export function appleDir(dest, mode = 'walk') {
   const f = mode === 'walk' ? 'w' : (mode === 'taxi' ? 'd' : 'r');
   return `https://maps.apple.com/?daddr=${dest.lat},${dest.lng}&dirflg=${f}`;

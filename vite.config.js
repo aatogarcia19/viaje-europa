@@ -30,11 +30,17 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
         navigateFallback: '/viaje-europa/index.html',
         cleanupOutdatedCaches: true,
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.hostname.endsWith('basemaps.cartocdn.com'),
+            urlPattern: ({ url }) => url.hostname === 'server.arcgisonline.com',
             handler: 'CacheFirst',
-            options: { cacheName: 'mapas', expiration: { maxEntries: 8000, maxAgeSeconds: 60 * 60 * 24 * 300 }, cacheableResponse: { statuses: [0, 200] } }
+            options: { cacheName: 'satelite', expiration: { maxEntries: 5000, maxAgeSeconds: 60 * 60 * 24 * 300 }, cacheableResponse: { statuses: [0, 200] } }
+          },
+          {
+            urlPattern: ({ url }) => url.hostname === 'tile.openstreetmap.org',
+            handler: 'CacheFirst',
+            options: { cacheName: 'mapa-osm', expiration: { maxEntries: 3000, maxAgeSeconds: 60 * 60 * 24 * 60 }, cacheableResponse: { statuses: [0, 200] } }
           },
           {
             urlPattern: ({ url }) => url.hostname === 'routing.openstreetmap.de',

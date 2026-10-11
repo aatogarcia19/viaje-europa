@@ -46,6 +46,12 @@ export default function Traslado({ id }) {
         </div>
 
         <section className="block">
+          <h2><Icon name="ext" size={18} /> Dónde ver horarios y comprar</h2>
+          <div className="actions-row">{buyLinks(t).map(l => <a key={l.url} className="btn sm" href={l.url} target="_blank" rel="noreferrer">{l.name}</a>)}</div>
+          <p className="hint">El número de tren o vuelo exacto lo eligen al comprar; después cambien aquí la hora y guarden el código de reserva.</p>
+        </section>
+
+        <section className="block">
           <h2><Icon name="ticket" size={18} /> Nuestro boleto</h2>
           <div className="seg">
             {Object.entries(STATUS).map(([k, l]) => <button key={k} className={v.status === k ? 'on' : ''} onClick={() => set('status', k)}>{l}</button>)}
@@ -63,4 +69,27 @@ export default function Traslado({ id }) {
       </div>
     </div>
   );
+}
+
+const OPS = [
+  [/renfe/i, 'Renfe', 'https://www.renfe.com'], [/iryo/i, 'iryo', 'https://iryo.eu'], [/ouigo/i, 'Ouigo', 'https://www.ouigo.com/es'],
+  [/eurostar/i, 'Eurostar', 'https://www.eurostar.com'], [/eurocity/i, 'NS International', 'https://www.nsinternational.com'],
+  [/trenitalia|frecciarossa/i, 'Trenitalia', 'https://www.trenitalia.com'], [/italo/i, 'Italo', 'https://www.italotreno.com'],
+  [/swiss/i, 'SWISS', 'https://www.swiss.com'], [/klm/i, 'KLM', 'https://www.klm.com'], [/vueling/i, 'Vueling', 'https://www.vueling.com'],
+  [/air france/i, 'Air France', 'https://www.airfrance.com'], [/ita airways/i, 'ITA Airways', 'https://www.ita-airways.com'],
+  [/iberia/i, 'Iberia', 'https://www.iberia.com'], [/ryanair/i, 'Ryanair', 'https://www.ryanair.com']
+];
+const IATA = { 'm-barajas': 'MAD', 'b-aeropuerto': 'BCN', 'p-orly': 'ORY', 'a-schiphol': 'AMS', 'z-airport': 'ZRH', 'v-airport': 'VCE', 'r-fco': 'FCO' };
+function buyLinks(t) {
+  const out = [];
+  const text = (t.ops || []).join(' ') + ' ' + (t.alt || '');
+  for (const [re, name, url] of OPS) if (re.test(text) && !out.some(o => o.name === name)) out.push({ name, url });
+  if (/nightjet/i.test(text)) out.push({ name: 'Nightjet', url: 'https://www.nightjet.com' });
+  if (t.mode === 'plane') {
+    const a = IATA[t.fromId] || 'GUA', b = IATA[t.toId] || 'GUA';
+    out.push({ name: 'Google Flights', url: `https://www.google.com/travel/flights?q=${encodeURIComponent(`vuelos de ${a} a ${b} el ${t.date} solo ida`)}&hl=es` });
+  } else {
+    out.push({ name: 'Trainline (comparar)', url: 'https://www.thetrainline.com/es' });
+  }
+  return out;
 }

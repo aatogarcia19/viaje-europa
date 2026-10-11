@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { get, all, update, useStore, me, setMe, status, pendingCount, sync, setCode, exportBackup, resetLocal } from '../lib/store.js';
 import { voices, play, unlock, rate } from '../lib/tts.js';
-import { tilesFor } from '../lib/geo.js';
+import { offlineUrls, cachedFetch } from '../lib/mapcache.js';
 import Icon from '../components/Icon.jsx';
 import { Header, Field } from '../components/ui.jsx';
 
@@ -28,24 +28,24 @@ export default function Ajustes() {
   const saveRates = () => update('trip', d => { d.rates = { EUR: Number(rates.EUR) || 8.8, CHF: Number(rates.CHF) || 9.5, GTQ: 1 }; });
 
   const saveMaps = async () => {
-    const cities = all('city');
-    const list = [];
-    const r = window.devicePixelRatio > 1 ? '@2x' : '';
-    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    for (const c of cities) {
-      const ps = all('place').filter(p => p.cityId === c.id && p.cat !== 'transporte');
-      if (!ps.length) continue;
-      const lats = ps.map(p => p.lat), lngs = ps.map(p => p.lng);
-      const pad = 0.006;
-      const b = { n: Math.max(...lats) + pad, s: Math.min(...lats) - pad, e: Math.max(...lngs) + pad, w: Math.min(...lngs) - pad };
-      for (const [z, x, y] of tilesFor(b, 12, 16)) list.push(`https://${'abcd'[(x + y) % 4]}.basemaps.cartocdn.com/${dark ? 'dark_all' : 'rastertiles/voyager'}/${z}/${x}/${y}${r}.png`);
+    const boxes = [];
+    for (const c of all('city')) {
+      const pts = all('place').filter(p => p.cityId === c.id && p.cat !== 'transporte').map(p => [p.lat, p.lng]);
+      if (c.lodging && typeof c.lodging.lat === 'number') pts.push([c.lodging.lat, c.lodging.lng]);
+      if (c.ref) pts.push([c.ref.lat, c.ref.lng]);
+      if (!pts.length) continue;
+      const pad = 0.008;
+      boxes.push({ n: Math.max(...pts.map(p => p[0])) + pad, s: Math.min(...pts.map(p => p[0])) - pad, e: Math.max(...pts.map(p => p[1])) + pad, w: Math.min(...pts.map(p => p[1])) - pad });
     }
+    setTiles({ done: 0, total: 1, fail: 0 });
+    let list;
+    try { list = await offlineUrls(boxes); } catch { setTiles({ done: 0, total: 0, fail: 1, finished: true, error: true }); return; }
     setTiles({ done: 0, total: list.length, fail: 0 });
     let done = 0, fail = 0;
     const worker = async () => {
       while (list.length) {
         const u = list.shift();
-        try { await fetch(u, { mode: 'no-cors' }); } catch { fail++; }
+        try { const r = await cachedFetch(u); if (!r.ok) fail++; } catch { fail++; }
         done++;
         if (done % 10 === 0 || !list.length) setTiles({ done, total: done + list.length, fail });
       }
@@ -98,9 +98,9 @@ export default function Ajustes() {
 
         <section className="block">
           <h2><Icon name="map" size={18} /> Mapas sin conexión</h2>
-          <p className="hint">Descarga los mapas de las 8 ciudades para verlos sin datos. Hazlo con wifi; son unos cuantos MB.</p>
+          <p className="hint">Descarga el mapa de calles de las 8 ciudades para verlo sin datos (hazlo con wifi). La vista satelital solo queda guardada en las zonas que ya hayan abierto.</p>
           <button className="btn" onClick={saveMaps} disabled={tiles && !tiles.finished}><Icon name="download" size={18} />{tiles && !tiles.finished ? `Guardando ${tiles.done} de ${tiles.total}…` : 'Guardar mapas del viaje'}</button>
-          {tiles?.finished ? <p className="hint">Listo: {tiles.done - tiles.fail} partes de mapa guardadas.</p> : null}
+          {tiles?.finished ? <p className="hint">{tiles.error ? 'No se pudo conectar con el servidor de mapas. Prueba de nuevo con wifi.' : `Listo: ${tiles.done - tiles.fail} partes de mapa guardadas${tiles.fail ? ` (${tiles.fail} fallaron; vuelve a intentarlo)` : ''}.`}</p> : null}
         </section>
 
         <section className="block">
